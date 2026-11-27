@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SaaS Gestion Scolaire</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f3f5f9;color:#1d2433}
+header{background:#1f3a8a;color:#fff;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
+main{max-width:960px;margin:20px auto;padding:0 12px}
+.card{background:#fff;border-radius:10px;padding:16px;margin-bottom:16px;box-shadow:0 1px 3px #0002}
+input,button{padding:8px 12px;margin:4px 0;border-radius:6px;border:1px solid #bbb;font-size:15px}
+button{background:#1f3a8a;color:#fff;border:0;cursor:pointer}
+table{width:100%;border-collapse:collapse}td,th{padding:6px;border-bottom:1px solid #e5e7eb;text-align:left}
+.alert{background:#fee2e2;color:#991b1b;padding:6px 10px;border-radius:6px;margin:4px 0}
+.tabs button{margin-right:6px}.hidden{display:none}
+</style></head><body>
+<header><b>SaaS Gestion Scolaire</b><span id="who"></span></header>
+<main>
+<div id="login" class="card"><h3>Connexion</h3>
+<input id="email" placeholder="E-mail" value="directeur.a@demo.tn"><br>
+<input id="pwd" type="password" placeholder="Mot de passe" value="Demo@2026"><br>
+<button onclick="login()">Se connecter</button> <span id="err" style="color:red"></span></div>
+<div id="app" class="hidden">
+<div class="tabs card" id="tabs"></div>
+<div id="content"></div></div>
+</main>
+<script>
+let token = '', user = null, charts = [];
+const $ = id => document.getElementById(id);
+const api = async p => { const r = await fetch(p, { headers: { Authorization: 'Bearer ' + token } }); return r.json(); };
+
+async function login() {
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: $('email').value, password: $('pwd').value }) });
+  const d = await r.json();
+  if (!r.ok) { $('err').textContent = d.error; return; }
+  token = d.token; user = d;
+  $('who').textContent = `${d.school} — ${d.name} (${d.role})`;
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  const tabs = [['Élèves', students]];
+  if (['admin', 'director'].includes(d.role)) tabs.push(['Dashboard général', general], ['Risques (EWS)', risks]);
+  if (['admin', 'director', 'accountant'].includes(d.role)) tabs.push(['Dashboard financier', finance]);
+  $('tabs').innerHTML = ''; tabs.forEach(([n, f]) => { const b = document.createElement('button'); b.textContent = n; b.onclick = f; $('tabs').appendChild(b); });
+  tabs[tabs.length > 1 ? 1 : 0][1]();
+}
+const table = (cols, rows) => '<table><tr>' + cols.map(c => `<th>${c}</th>`).join('') + '</tr>' +
+  rows.map(r => '<tr>' + r.map(v => `<td>${v}</td>`).join('') + '</tr>').join('') + '</table>';
+const reset = html => { charts.forEach(c => c.destroy()); charts = []; $('content').innerHTML = html; };
+
+async function students() {
+  const d = await api('/api/students');
+  reset(`<div class="card"><h3>Élèves</h3>${table(['Nom', 'Classe', 'Absences'], d.map(s => [s.name, s.classe, s.absences]))}</div>`);
+}
+async function general() {
+  const d = await api('/api/dashboard/general');
+  reset(`<div class="card"><h3>Vue globale — ${d.totalEleves} élèves</h3>${d.alerts.map(a => `<div class="alert">${a}</div>`).join('')}
+    <canvas id="c1" height="100"></canvas></div>`);
+  charts.push(new Chart($('c1'), { type: 'bar', data: { labels: d.classes.map(c => c.name),
+    datasets: [{ label: 'Effectif', data: d.classes.map(c => c.effectif) }, { label: 'Capacité', data: d.classes.map(c => c.capacity) }] } }));
+}
+async function finance() {
+  const d = await api('/api/dashboard/finance');
+  reset(`<div class="card"><h3>Finances — recouvrement ${d.tauxRecouvrement}%</h3>
+    <p>Attendu : ${d.attendu} DT | Encaissé : ${d.encaisse} DT | Reste : ${d.reste} DT</p>
+    <canvas id="c2" height="80"></canvas>
+    <h4>Parents en retard</h4>${table(['Élève', 'Reste à payer (DT)'], d.retards.map(r => [r.name, r.reste]))}</div>`);
+  charts.push(new Chart($('c2'), { type: 'doughnut', data: { labels: ['Encaissé', 'Reste'], datasets: [{ data: [d.encaisse, d.reste] }] } }));
+}
+async function risks() {
+  const d = await api('/api/dashboard/risques');
+  reset(`<div class="card"><h3>Early Warning System</h3>${table(['Élève', 'Moyenne', 'Absences', '% payé', 'Alertes'],
+    d.map(r => [r.name, r.moyenne, r.absences, r.pctPaye + '%', r.flags.map(f => `<span class="alert">${f}</span>`).join(' ')]))}</div>`);
+}
+</script></body></html>
